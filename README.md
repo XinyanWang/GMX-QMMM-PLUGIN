@@ -4,22 +4,22 @@ This project is made for using QMMM method in searching for reaction pathway on 
 To Do List
 
 - reader
- - GroFile
- - TopFile
+  - GroFile
+  - TopFile
 - engine (renew positions)
- - NVEEngine
-  - constraint
- - LangevinEngine
- - NPTEngine
+  - NVEEngine
+    - constraint
+  - LangevinEngine
+  - NPTEngine
 - calculator (calculate forces and velocities)
- - QMCalculator
- - MMCalculator
+  - QMCalculator
+  - MMCalculator
 - reporter
- - PDBReporter
- - TRJReporter
+  - PDBReporter
+  - TRJReporter
 - add force
- - ForceAdder
- - SimpleHarmonicAdder
- - GaussAdder
- - LambdaAdder
- - PrincipalComponentAdder
+  - ForceAdder
+  - SimpleHarmonicAdder
+  - GaussAdder
+  - LambdaAdder
+  - PrincipalComponentAdder
