@@ -13,6 +13,8 @@ To Do List
   - NPTEngine
 - calculator (calculate forces and velocities)
   - QMCalculator
+    - DFTB+
+    - Gaussian
   - MMCalculator
 - reporter
   - PDBReporter
