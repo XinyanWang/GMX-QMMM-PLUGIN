@@ -1,5 +1,5 @@
 #coding=utf-8
-import os, sys
+import os, sys, re
 import numpy as np
 
 
@@ -41,10 +41,9 @@ def write_gau_fort7(energy, force_list, field_list, charge):
 			x, y, z = line
 			f.write("%20.10E %20.10E %20.10E\n"%(- x, - y, - z))
 		for num, line in enumerate(field_list):
-			x, y, z = [float(i) for i in line.strip().split(' ') if i][2:]
-			ic = float([i for i in charge[num].strip().split(' ') if i][-1])
-			f.write("%20.10E %20.10E %20.10E\n"%(-x*ic, -y*ic, -z*ic))
-
+			x, y, z = line
+			f.write("%20.10E %20.10E %20.10E\n"%(- x, - y, - z))
+		f.write("\n")
 
 class QuantumCalculateFail(BaseException):
 	pass
@@ -90,7 +89,7 @@ class GaussCalculator(BaseCalculator):
 	"""
 
 	def __init__(self, system = "Linux", gauss_exe = "g09", scfcyc = 128, 
-		method = "HF", basis = "6-31G", nproc = 1, mem = "200MW", params = None, 
+		method = "HF", basis = "6-31G", nproc = 1, mem = "200MW", 
 		sys_charge = 0, sys_mlt = 1, mid_name = 'inp.gjf', mid_return = "inp.out"):
 		super(GaussCalculator, self).__init__(sys_charge = sys_charge, sys_mlt = sys_mlt, mid_name = mid_name, mid_return = mid_return)
 		self.SYSTEM = system
@@ -98,7 +97,6 @@ class GaussCalculator(BaseCalculator):
 		self.NPROC = nproc
 		self.MEM = mem
 		self.COMMAND = "# {method}/{basis} FORCE Nosymm Punch=Derivatives".format(method = method, basis = basis)
-		self.PARAMS = params
 		self.RETRY = 0
 
 	def _execute(self):
@@ -119,15 +117,16 @@ class GaussCalculator(BaseCalculator):
 
 	def _mk_mid_file(self, coord, charge):
 		self._inp_coord, self._inp_charge = coord, charge
+		_COMMAND = self.COMMAND
 		if len(charge):
-			self.COMMAND += " CHARGE Prop=(Field, Read)"
+			_COMMAND += " CHARGE Prop=(Field, Read)"
 		if "inp.chk" in os.listdir('.'):
-			self.COMMAND += " GUESS=READ"
+			_COMMAND += " GUESS=READ"
 
 		template = ""
 		template += "%MEM={MEM}\n%CHK=inp.chk\n%NPROC={NPROC}\n".format(MEM=self.MEM, NPROC=self.NPROC)
 
-		template += self.COMMAND + "\n\n"
+		template += _COMMAND + "\n\n"
 
 		template += "GMX_INP\n\n{CHRG} {MLT}\n".format(CHRG=self.CHARGE, MLT=self.MLT)
 
@@ -148,7 +147,7 @@ class GaussCalculator(BaseCalculator):
 			with open(self.MIDRETURN, "r") as f:
 				out_text = f.readlines()
 			with open("fort.7") as f:
-				force_list = f.readlines()
+				force_list = f.readlines()[1:]
 		except FileNotFoundError as e:
 			if self.RETRY > 2:
 				raise e
@@ -162,7 +161,7 @@ class GaussCalculator(BaseCalculator):
 				energy = float(re.findall(r"[-0-9.]{9,}", line)[0])
 		
 		force_list = [[float('E'.join(j.split('D'))) for j in i.strip().split(' ') if j] for i in force_list if i.strip()]
-		if not len(self.force_list):
+		if not len(force_list):
 			raise QuantumCalculateFail("No data in 'fort.7'.")
 
 		for num in range(len(out_text)):
@@ -170,7 +169,9 @@ class GaussCalculator(BaseCalculator):
 				break
 		start = num + 3 + len(self._inp_coord)
 		end = num + 3 + len(self._inp_coord) + len(self._inp_charge)
-		field_list = out_text[start:end]
+		field_list = [[float(j) for j in i.strip().split(' ') if j][-3:] for i in out_text[start:end]]
+		if len(field_list) != len(self._inp_charge):
+			raise QuantumCalculateFail("Field length is only %i while charge length is %i"%(len(field_list), len(self._inp_charge)))
 
 		self.energy, self.force_list, self.field_list = energy, force_list, field_list
 		return energy, force_list, field_list
@@ -187,12 +188,15 @@ class DFTBPCalculator(BaseCalculator):
 			  16:['S', 'd', '-0.1100'], 
 			  17:['Cl', 'd', '-0.0697']}
 
-	def __init__(self, num_iter = 128, sys_charge = 0, sys_mlt = 1, mid_name = 'dftb_in.hsd', mid_return = "detailed.out"):
+	def __init__(self,prefix = None, num_iter = 128, sys_charge = 0, sys_mlt = 1, mid_name = 'dftb_in.hsd', mid_return = "detailed.out"):
 		super(DFTBPCalculator, self).__init__(sys_charge = sys_charge, sys_mlt = sys_mlt, mid_name = mid_name, mid_return = mid_return)
 		self.NUM_ITER = num_iter
+		self.PREFIX = prefix
+		if not self.PREFIX:
+			raise QuantumCalculateFail("S-K parameters need to be set.")
 
 	def _execute(self):
-		return "dftb+"
+		return "dftb+ > output.log"
 
 	def _preprocessing(self):
 		listdir = os.listdir('.')
@@ -204,7 +208,7 @@ class DFTBPCalculator(BaseCalculator):
 		self._inp_coord, self._inp_charge = coord, charge
 
 		template = "Geometry = {\n"
-		atom_to_num = {a:num for num, a in enumerate(set([i[0] for i in _coord]))}
+		atom_to_num = {a:num for num, a in enumerate(set([i[0] for i in coord]))}
 		num_to_atom = {v:k for k, v in atom_to_num.items()}
 		template += """TypeNames = {"""
 		for i in range(len(atom_to_num)):
@@ -215,7 +219,8 @@ class DFTBPCalculator(BaseCalculator):
 			template += "%i %16.8f %16.8f %16.8f\n"%(atom_to_num[natom]+1, x, y, z)
 		template += "}\n}\n"
 		template += "Hamiltonian = DFTB{\n"
-		template += "SCC = Yes\nMaxSCCIterations = {num_iter}\nSCCTolerance = 1e-7\n".format(num_iter=self.NUM_ITER)
+		template += "SCC = Yes\nMaxSCCIterations = {num_iter}\nSCCTolerance = 1e-6\n".format(num_iter=self.NUM_ITER)
+		template += "Filling = Fermi {\nTemperature [K] = 300\n}\n"
 		template += "MaxAngularMomentum = {\n"
 		for i in range(len(atom_to_num)):
 			template += self.atom_index[num_to_atom[i]][0] + ' = "' + self.atom_index[num_to_atom[i]][1] + '"\n'
@@ -227,12 +232,15 @@ class DFTBPCalculator(BaseCalculator):
 		for i in range(len(atom_to_num)):
 			template += self.atom_index[num_to_atom[i]][0] + ' = ' + self.atom_index[num_to_atom[i]][2] + '\n'
 		template += '}\n'
-		template += "ElectricField = {\n"
-		template += "PointCharges = {\n"
-		template += "CoordsAndCharges [Angstrom] = {\n"
-		for x, y, z, chrg in charge:
-			template += "%16.8f %16.8f %16.8f %f\n"%(x, y, z, chrg)
-		template += "}\n}\n}\n"
+		
+		if len(charge):
+			template += "ElectricField = {\n"
+			template += "PointCharges = {\n"
+			template += "CoordsAndCharges [Angstrom] = {\n"
+			for x, y, z, chrg in charge:
+				template += "%16.8f %16.8f %16.8f %f\n"%(x, y, z, chrg)
+			template += "}\n}\n}\n"
+
 		template += 'ForceEvaluation = "dynamics"\n}\nAnalysis = {\nCalculateForces = Yes\n}\n'
 
 		return template
@@ -246,30 +254,20 @@ class DFTBPCalculator(BaseCalculator):
 		for num, line in enumerate(out_text):
 			if "Total Forces" in line:
 				break
-		force_list = [[ - float(j) for j in i.split(' ') if j] for i in out_text[num+1:num+1+len(self._inp_coord)]]
+		force_list = [[ float(j) for j in i.split(' ') if j] for i in out_text[num+1:num+1+len(self._inp_coord)]]
 
 		if len(force_list) == 0:
 			raise QuantumCalculateFail("SCC Error.")
 		
 		field_list = []
-		for num, line in enumerate(out_text):
-			if "Net atomic charges" in line:
-				break
-		atom_charge = np.array([float([j for j in i.split(' ') if j][1]) for i in out_text[num+2:num+2+len(self._inp_coord)]])
-		atom_coord = np.array([_[1:] for _ in self._inp_coord])
-		point_coord = np.array(self._inp_charge)[:,:3]
-		point_charge = np.array(self._inp_charge)[:,3]
+		if len(self._inp_charge):
+			for num, line in enumerate(out_text):
+				if "Forces on external charges" in line:
+					break
+			field_list = [[float(j) for j in i.split(' ') if j] for i in out_text[num+1:num+1+len(self._inp_charge)]]
 
-		field_mat = np.zeros((point_charge.shape[0], 3))
-		for n_atom in range(atom_coord.shape[0]):
-			r_v = point_coord - atom_coord[n_atom,:]
-			r_2 = np.power(r_v, 2).sum(axis=1)
-			field_mat += atom_charge[n_atom] * point_charge / r_2 * (r_v / np.sqrt(r_2)) * (Bohr_to_An ** 2)
-		for x, y, z in field_mat:
-			field_list.append([x, y, z])
-
-		try:
-			self.energy, self.force_list, self.field_list = energy, force_list, field_list
-		except NameError as e:
-			raise QuantumCalculateFail("Calculation Error.")
+			try:
+				self.energy, self.force_list, self.field_list = energy, force_list, field_list
+			except NameError as e:
+				raise QuantumCalculateFail("Calculation Error.")
 		return energy, force_list, field_list
