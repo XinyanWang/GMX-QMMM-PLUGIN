@@ -188,12 +188,14 @@ class DFTBPCalculator(BaseCalculator):
 			  16:['S', 'd', '-0.1100'], 
 			  17:['Cl', 'd', '-0.0697']}
 
-	def __init__(self,prefix = None, num_iter = 128, sys_charge = 0, sys_mlt = 1, mid_name = 'dftb_in.hsd', mid_return = "detailed.out"):
+	def __init__(self,prefix = None, num_iter = 128, temperature = 300, sys_charge = 0, sys_mlt = 1, mid_name = 'dftb_in.hsd', mid_return = "detailed.out"):
 		super(DFTBPCalculator, self).__init__(sys_charge = sys_charge, sys_mlt = sys_mlt, mid_name = mid_name, mid_return = mid_return)
 		self.NUM_ITER = num_iter
 		self.PREFIX = prefix
 		if not self.PREFIX:
 			raise QuantumCalculateFail("S-K parameters need to be set.")
+		self.TEMP = temperature
+		self._initTEMP = temperature
 
 	def _execute(self):
 		return "dftb+ > output.log"
@@ -220,7 +222,7 @@ class DFTBPCalculator(BaseCalculator):
 		template += "}\n}\n"
 		template += "Hamiltonian = DFTB{\n"
 		template += "SCC = Yes\nMaxSCCIterations = {num_iter}\nSCCTolerance = 1e-6\n".format(num_iter=self.NUM_ITER)
-		template += "Filling = Fermi {\nTemperature [K] = 300\n}\n"
+		template += "Filling = Fermi {\nTemperature [K] = %i\n}\n"%self.TEMP
 		template += "MaxAngularMomentum = {\n"
 		for i in range(len(atom_to_num)):
 			template += self.atom_index[num_to_atom[i]][0] + ' = "' + self.atom_index[num_to_atom[i]][1] + '"\n'
@@ -257,7 +259,11 @@ class DFTBPCalculator(BaseCalculator):
 		force_list = [[ float(j) for j in i.split(' ') if j] for i in out_text[num+1:num+1+len(self._inp_coord)]]
 
 		if len(force_list) == 0:
-			raise QuantumCalculateFail("SCC Error.")
+			if self.TEMP > self._initTEMP + 20:
+				raise QuantumCalculateFail("SCC Error.")
+			self.TEMP += 5
+			print("Temperature up to",self.TEMP)
+			return self.calculate(self._inp_coord, self._inp_charge)
 		
 		field_list = []
 		if len(self._inp_charge):
