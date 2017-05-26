@@ -11,9 +11,9 @@ To Do List
   - LangevinEngine
   - NPTEngine
 - calculator (calculate forces and velocities)
-  - QMCalculator
-    - DFTB+
-    - Gaussian
+  - QMCalculator (Done)
+    - DFTB+ (Done)
+    - Gaussian (Done)
   - MMCalculator
 - reporter
   - PDBReporter
